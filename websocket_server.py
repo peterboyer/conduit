@@ -1,11 +1,51 @@
+import bpy
+import threading
+import socketserver
+
 bl_info = {
     "name": "Avalon",
     "blender": (2, 80, 0),
     "category": "Import-Export"
 }
 
-import threading
-import socketserver
+
+# events
+
+def on_object_transform(object, scene):
+    print("on_object_transform", object.name, scene.name)
+
+
+def on_object_transform_complete(object, scene):
+    print("on_object_transform_complete", object.name, scene.name)
+
+
+# https://blender.stackexchange.com/a/283286
+def on_depsgraph_update(scene):
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+
+    if on_depsgraph_update.operator is None:
+        on_depsgraph_update.operator = bpy.context.active_operator
+
+    for update in depsgraph.updates:
+        if not update.is_updated_transform:
+            continue
+
+        object = bpy.context.active_object
+
+        if on_depsgraph_update.operator is bpy.context.active_operator:
+            on_object_transform(object, scene)
+            continue
+
+        on_object_transform_complete(object, scene)
+        on_depsgraph_update.operator = None
+
+
+on_depsgraph_update.operator = None
+
+# server
+
+server = None
+
 
 class RequestHandler(socketserver.BaseRequestHandler):
     def handle(self):
@@ -15,11 +55,8 @@ class RequestHandler(socketserver.BaseRequestHandler):
         print(self.data)
         self.request.sendall(self.data.upper())
 
-server = None
 
-def register():
-    print("avalon:register")
-
+def server_start():
     global server
     if server:
         return
@@ -29,12 +66,34 @@ def register():
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
 
-def unregister():
-    print("avalon:unregister")
 
+def server_stop():
     global server
     if not server:
         return
 
     server.shutdown()
     server = None
+
+
+# plugin
+
+options = {
+    "server": False
+}
+
+
+def register():
+    print("avalon:register")
+    bpy.app.handlers.depsgraph_update_post.append(on_depsgraph_update)
+
+    if options["server"]:
+        server_start()
+
+
+def unregister():
+    print("avalon:unregister")
+    bpy.app.handlers.depsgraph_update_post.remove(on_depsgraph_update)
+
+    if options["server"]:
+        server_stop()
