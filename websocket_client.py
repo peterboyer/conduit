@@ -1,17 +1,13 @@
+# https://gist.github.com/ninedraft/7c47282f8b53ac015c1e326fffb664b5
+
 import socket
-import sys
 
-HOST, PORT = "localhost", 9999
-data = " ".join(sys.argv[1:])
+client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+client.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+client.connect(("127.0.0.1", 37020))
 
-# Create a socket (SOCK_STREAM means a TCP socket)
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-    # Connect to server and send data
-    sock.connect((HOST, PORT))
-    sock.sendall(bytes(data + "\n", "utf-8"))
-
-    # Receive data from the server and shut down
-    received = str(sock.recv(1024), "utf-8")
-
-print("Sent:     {}".format(data))
-print("Received: {}".format(received))
+while True:
+    data, addr = client.recvfrom(1024)
+    print("received message: {}".format(data))
