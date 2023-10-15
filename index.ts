@@ -55,7 +55,7 @@ const actors: {
 
 				mesh.receiveShadow = true;
 
-				const mass = child.name === "Plane" ? 0 : 1;
+				const mass = child.name === "ground" ? 0 : 1;
 
 				const body = new CANNON.Body({ mass, material: groundMaterial });
 				body.position.copy(mesh.position as unknown as CANNON.Vec3);
