@@ -13,6 +13,27 @@ bl_info = {
 }
 
 
+ACTOR_NONE = "__NONE__"
+
+
+def object_update_placeholder(self, ctx):
+	value = self.conduit_actor
+	collection = None
+
+	if ctx.scene.conduit_actors:
+		for actor in ctx.scene.conduit_actors:
+			if (actor.name == value):
+				collection = actor.placeholder
+
+	if collection:
+		self.instance_type = 'COLLECTION'
+		self.instance_collection = collection
+		return
+
+	self.instance_type = 'NONE'
+	self.instance_collection = None
+
+
 class ExportOperator(bpy.types.Operator):
 	bl_idname = "conduit.export"
 	bl_label = "Export scene.gltf"
@@ -24,18 +45,24 @@ class ExportOperator(bpy.types.Operator):
 			return {'CANCELLED'}
 
 		# Clear all instance/instance_collection for export, then restore.
-		placeholders = []
+		actors = []
 
 		for object in bpy.data.objects:
 			actor_id = object.conduit_actor
 			if actor_id and actor_id != ACTOR_NONE:
-				placeholders.append((object, object.instance_collection))
+				actors.append((
+					object, object.conduit_actor, object.instance_collection))
 				object.instance_type = 'NONE'
 				object.instance_collection = None
 
-		filepath = bpy.path.abspath("//") + "scene.gltf"
+		# Workaround to export literal value instead of enum integer.
+		conduit_actor = bpy.types.Object.conduit_actor
+		bpy.types.Object.conduit_actor = bpy.props.StringProperty()
+		for object, actor_id, instance_collection in actors:
+			object.conduit_actor = actor_id
 
 		# https://docs.blender.org/api/current/bpy.ops.export_scene.html
+		filepath = bpy.path.abspath("//") + "scene.gltf"
 		bpy.ops.export_scene.gltf(
 			filepath=filepath,
 			check_existing=False,
@@ -51,9 +78,15 @@ class ExportOperator(bpy.types.Operator):
 			export_extras=True,
 		)
 
-		for object, instance_collection in placeholders:
+		# Enum workaround, reset.
+		bpy.types.Object.conduit_actor = conduit_actor
+
+		for object, actor_id, instance_collection in actors:
 			object.instance_type = 'COLLECTION'
+			if not instance_collection:
+				object_update_placeholder(object, ctx)
 			object.instance_collection = instance_collection
+			object.conduit_actor = actor_id
 
 		return {'FINISHED'}
 
@@ -89,29 +122,6 @@ class ObjectPropertiesPanel(bpy.types.Panel):
 			"conduit_actor",
 			text="Actor",
 		)
-
-
-ACTOR_NONE = "__NONE__"
-
-
-def object_update_placeholder(self, ctx):
-	value = self.conduit_actor
-	collection = None
-
-	if ctx.scene.conduit_actors:
-		for actor in ctx.scene.conduit_actors:
-			print('actor:', actor.name, actor.placeholder)
-			if (actor.name == value):
-				collection = actor.placeholder
-
-	print('select:', value, collection)
-	if collection:
-		self.instance_type = 'COLLECTION'
-		self.instance_collection = collection
-		return
-
-	self.instance_type = 'NONE'
-	self.instance_collection = None
 
 
 def scene_actor_placeholder_update(self, ctx):
