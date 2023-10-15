@@ -21,56 +21,62 @@ const groundMaterial = new CANNON.Material("ground");
 // groundMaterial.restitution = 0.25
 
 const getVec3Tuple = (
-  vec3: Record<"x" | "y" | "z", number>,
+	vec3: Record<"x" | "y" | "z", number>,
 ): [x: number, y: number, z: number] => {
-  const { x, y, z } = vec3;
-  return [x, y, z];
+	const { x, y, z } = vec3;
+	return [x, y, z];
 };
 
 const actors: {
-  mesh: THREE.Mesh;
-  body: CANNON.Body;
+	mesh: THREE.Mesh;
+	body: CANNON.Body;
 }[] = [];
 
 {
-  const url = sceneGltf;
-  const gltfLoader = new GLTFLoader();
-  gltfLoader.load(url, (gltf) => {
-    console.log(gltf);
-    camera = gltf.cameras[0];
-    const controls = new OrbitControls(camera, canvas);
-    controls.update();
-    scene.add(gltf.scene);
-    gltf.scene.children.forEach((child) => {
-      if (child.type === "Mesh") {
-        const mesh = child as THREE.Mesh;
+	const url = sceneGltf;
+	const gltfLoader = new GLTFLoader();
+	gltfLoader.load(url, (gltf) => {
+		console.log(gltf);
 
-        if (!mesh.geometry.boundingBox) {
-          return;
-        }
+		camera = gltf.cameras[0];
+		camera.aspect = canvas.clientWidth / canvas.clientHeight;
+		camera.updateProjectionMatrix();
 
-        mesh.receiveShadow = true;
+		const controls = new OrbitControls(camera, canvas);
+		controls.update();
 
-        const mass = child.name === "Plane" ? 0 : 1;
+		gltf.scene.children.forEach((child) => {
+			if (child.type === "Mesh") {
+				const mesh = child as THREE.Mesh;
 
-        const body = new CANNON.Body({ mass, material: groundMaterial });
-        body.position.copy(mesh.position as unknown as CANNON.Vec3);
-        const shape = new CANNON.Box(
-          new CANNON.Vec3(
-            ...getVec3Tuple(
-              mesh.geometry.boundingBox.max.divide(new THREE.Vector3(2, 1, 2)),
-            ),
-          ),
-        );
-        body.addShape(shape);
-        world.addBody(body);
+				if (!mesh.geometry.boundingBox) {
+					return;
+				}
 
-        actors.push({ mesh, body });
-      }
-    });
+				mesh.receiveShadow = true;
 
-    console.log(actors);
-  });
+				const mass = child.name === "Plane" ? 0 : 1;
+
+				const body = new CANNON.Body({ mass, material: groundMaterial });
+				body.position.copy(mesh.position as unknown as CANNON.Vec3);
+				const shape = new CANNON.Box(
+					new CANNON.Vec3(
+						...getVec3Tuple(
+							mesh.geometry.boundingBox.max.divide(new THREE.Vector3(2, 1, 2)),
+						),
+					),
+				);
+				body.addShape(shape);
+				world.addBody(body);
+
+				actors.push({ mesh, body });
+			}
+		});
+
+		console.log(actors);
+
+		scene.add(gltf.scene);
+	});
 }
 
 // const groundWheelContactMaterial = new CANNON.ContactMaterial(
@@ -94,14 +100,14 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setAnimationLoop(animation);
 
 function animation(_dt: number) {
-  world.fixedStep();
+	world.fixedStep();
 
-  actors.forEach(({ mesh, body }) => {
-    mesh.position.copy(body.position as unknown as THREE.Vector3);
-    mesh.quaternion.copy(body.quaternion as unknown as THREE.Quaternion);
-  });
+	actors.forEach(({ mesh, body }) => {
+		mesh.position.copy(body.position as unknown as THREE.Vector3);
+		mesh.quaternion.copy(body.quaternion as unknown as THREE.Quaternion);
+	});
 
-  renderer.render(scene, camera);
+	renderer.render(scene, camera);
 }
 
 // camera
