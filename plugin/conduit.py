@@ -4,6 +4,7 @@
 # https://en.wikibooks.org/wiki/Blender_3D%3A_Noob_to_Pro/Advanced_Tutorials/Python_Scripting/Addon_Custom_Property
 # https://sinestesia.co/blog/tutorials/using-uilists-in-blender/
 
+import os
 import bpy
 
 bl_info = {
@@ -48,7 +49,6 @@ class ExportOperator(bpy.types.Operator):
 
 		# Clear all instance/instance_collection for export, then restore.
 		actors = []
-
 		for object in ctx.scene.objects:
 			actor_id = object.conduit_actor
 			if actor_id and actor_id != ACTOR_NONE:
@@ -63,9 +63,11 @@ class ExportOperator(bpy.types.Operator):
 		for object, actor_id, instance_collection in actors:
 			object.conduit_actor = actor_id
 
-		# https://docs.blender.org/api/current/bpy.ops.export_scene.html
+		filedir = bpy.path.abspath(ctx.scene.conduit_export_path or "//")
 		filename = ctx.scene.name + ".gltf"
-		filepath = bpy.path.abspath("//") + filename
+		filepath = os.path.abspath(filedir + filename)
+
+		# https://docs.blender.org/api/current/bpy.ops.export_scene.html
 		bpy.ops.export_scene.gltf(
 			filepath=filepath,
 			check_existing=False,
@@ -84,6 +86,7 @@ class ExportOperator(bpy.types.Operator):
 		# Enum workaround, reset.
 		bpy.types.Object.conduit_actor = conduit_actor
 
+		# Restore actors properties.
 		for object, actor_id, instance_collection in actors:
 			object.instance_type = 'COLLECTION'
 			if not instance_collection:
@@ -106,6 +109,11 @@ class ExportPanel(bpy.types.Panel):
 		self.layout.operator(
 			ExportOperator.bl_idname,
 			text="Export as " + filename,
+		)
+		self.layout.prop(
+			ctx.scene,
+			"conduit_export_path",
+			text="Path",
 		)
 
 
@@ -222,6 +230,8 @@ def register():
 	bpy.utils.register_class(SceneActorProperty)
 
 	# props
+	bpy.types.Scene.conduit_export_path = \
+		bpy.props.StringProperty(subtype='DIR_PATH', default="//")
 	bpy.types.Scene.conduit_actors = \
 		bpy.props.CollectionProperty(type=SceneActorProperty)
 	bpy.types.Scene.conduit_actors_active_index = \
@@ -258,6 +268,7 @@ def unregister():
 	bpy.utils.unregister_class(SceneActorRemoveOperator)
 
 	# props
+	del bpy.types.Scene.conduit_export_path
 	del bpy.types.Scene.conduit_actors
 	del bpy.types.Scene.conduit_actors_active_index
 	del bpy.types.Object.conduit_actor
