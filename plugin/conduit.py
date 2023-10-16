@@ -44,10 +44,12 @@ class ExportOperator(bpy.types.Operator):
 			self.report({'WARNING'}, "Scene must be saved first.")
 			return {'CANCELLED'}
 
+		bpy.types.Object.conduit_hidden = bpy.props.BoolProperty()
+
 		# Clear all instance/instance_collection for export, then restore.
 		actors = []
 
-		for object in bpy.data.objects:
+		for object in ctx.scene.objects:
 			actor_id = object.conduit_actor
 			if actor_id and actor_id != ACTOR_NONE:
 				actors.append((
@@ -62,7 +64,8 @@ class ExportOperator(bpy.types.Operator):
 			object.conduit_actor = actor_id
 
 		# https://docs.blender.org/api/current/bpy.ops.export_scene.html
-		filepath = bpy.path.abspath("//") + "scene.gltf"
+		filename = ctx.scene.name + ".gltf"
+		filepath = bpy.path.abspath("//") + filename
 		bpy.ops.export_scene.gltf(
 			filepath=filepath,
 			check_existing=False,
@@ -99,9 +102,10 @@ class ExportPanel(bpy.types.Panel):
 	bl_category = "Conduit"
 
 	def draw(self, ctx):
+		filename = ctx.scene.name + ".gltf"
 		self.layout.operator(
 			ExportOperator.bl_idname,
-			text=ExportOperator.bl_label,
+			text="Export as " + filename,
 		)
 
 
@@ -255,6 +259,7 @@ def unregister():
 
 	# props
 	del bpy.types.Scene.conduit_actors
+	del bpy.types.Scene.conduit_actors_active_index
 	del bpy.types.Object.conduit_actor
 
 	# types
