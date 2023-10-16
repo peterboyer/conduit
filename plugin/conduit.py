@@ -133,7 +133,7 @@ class WorkspacePanel(bpy.types.Panel):
 			template_list_options["data"][1],
 			template_list_options["data_active_index"][0],
 			template_list_options["data_active_index"][1],
-			rows=4,
+			rows=1,
 		)
 
 		col = row.column(align=True)
