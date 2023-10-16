@@ -1,21 +1,22 @@
 declare module "three/addons/loaders/GLTFLoader" {
-	import { LoadingManager, Camera } from "three";
+	import type * as THREE from "three";
 
 	export type GLTF = {
-		cameras: Camera[];
+		cameras: unknown[];
+		scene: THREE.Scene;
 	};
 
 	export class GLTFLoader {
-		constructor(manager?: LoadingManager);
+		constructor(manager?: THREE.LoadingManager);
 		load(url: string, callback: (gltf: GLTF) => void): void;
 	}
 }
 
 declare module "three/addons/controls/OrbitControls" {
-	import { Camera } from "three";
+	import type * as THREE from "three";
 
 	export class OrbitControls {
-		constructor(camera: Camera, canvas: Element);
+		constructor(camera: THREE.Camera, canvas: Element);
 		update(): void;
 	}
 }

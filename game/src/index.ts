@@ -1,141 +1,192 @@
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader";
 import { OrbitControls } from "three/addons/controls/OrbitControls";
 import CannonDebugger from "cannon-es-debugger";
 
 import * as scenes from "./scenes";
 
-async function load() {
+const V3 = {
+	toTHREE: (vec: CANNON.Vec3) => vec as unknown as THREE.Vector3,
+	toCANNON: (vec: THREE.Vector3) => vec as unknown as CANNON.Vec3,
+	toTuple: (
+		vec: Record<"x" | "y" | "z", number>,
+	): [x: number, y: number, z: number] => {
+		const { x, y, z } = vec;
+		return [x, y, z];
+	},
+};
+
+(async () => {
 	const [level, cube, car] = await Promise.all([
 		scenes.level.gltf,
 		scenes.cube.gltf,
-		scenes.cube.gltf,
+		scenes.car.gltf,
 	]);
 
-	// camera
-	const camera = level.cameras[0];
-	if (camera instanceof THREE.PerspectiveCamera) {
-		camera.aspect = canvas.clientWidth / canvas.clientHeight;
-		camera.updateProjectionMatrix();
-		const controls = new OrbitControls(camera, canvas);
-		controls.update();
-	}
+	console.log({ level, cube, car });
 
-	level.scene.children.forEach((child) => {
-		if (child.type === "Mesh") {
-			const mesh = child as THREE.Mesh;
+	const canvas = document.querySelector("#app")!;
 
+	const camera = (() => {
+		const camera = level.cameras[0];
+		if (camera instanceof THREE.PerspectiveCamera) {
+			return camera;
+		}
+		return new THREE.PerspectiveCamera();
+	})();
+
+	camera.aspect = document.body.clientWidth / document.body.clientHeight;
+	camera.updateProjectionMatrix();
+	const controls = new OrbitControls(camera, canvas);
+	controls.update();
+
+	const renderer = new THREE.WebGLRenderer({
+		antialias: true,
+		canvas: canvas,
+	});
+	renderer.setSize(window.innerWidth, window.innerHeight);
+	renderer.setAnimationLoop(animation);
+
+	const scene = new THREE.Scene();
+	scene.background = new THREE.Color("grey");
+
+	const world = new CANNON.World();
+	world.gravity.set(0, -9.82, 0);
+	world.broadphase = new CANNON.SAPBroadphase(world);
+	world.defaultContactMaterial.friction = 0;
+
+	type Actor = { object: THREE.Object3D };
+	const actors = {
+		cube: [] as Actor[],
+		car: [] as Actor[],
+	};
+
+	const bodies: { object: THREE.Object3D; body: CANNON.Body }[] = [];
+
+	const materials = {
+		ground: new CANNON.Material("ground"),
+	};
+
+	level.scene.children.forEach((object) => {
+		if (object instanceof THREE.Mesh) {
+			const mesh = object;
 			mesh.receiveShadow = true;
 
-			// if (mesh.geometry.boundingBox) {
-			// }
-
-			const body = new CANNON.Body({ mass: 0, material: groundMaterial });
-			body.position.copy(mesh.position as unknown as CANNON.Vec3);
-
-			const vertices = mesh.geometry.attributes["position"]!
+			type Geometry = THREE.BufferGeometry<{ position: THREE.BufferAttribute }>;
+			const indices = (mesh.geometry as Geometry).index!
 				.array as unknown as number[];
-			const indices = mesh.geometry.index!.array as unknown as number[];
+			const vertices = (mesh.geometry as Geometry).attributes.position
+				.array as unknown as number[];
 			const shape = new CANNON.Trimesh(vertices, indices);
-			body.addShape(shape);
 
-			// const shape = new CANNON.Box(
-			//   new CANNON.Vec3(
-			//     ...getVec3Tuple(
-			//       mesh.geometry.boundingBox.max.divide(new THREE.Vector3(2, 1, 2)),
-			//     ),
-			//   ),
-			// );
+			const body = new CANNON.Body({
+				mass: 0,
+				shape,
+				material: materials.ground,
+				position: V3.toCANNON(mesh.position),
+			});
 
 			world.addBody(body);
-
-			physicsActors.push({ mesh, body });
-		} else if (child.type === "Object3D") {
-			const object = child;
-			const actorType = child.userData.conduit_actor as string | undefined;
-			if (actorType) {
-				addActor(actorType, object);
+			bodies.push({ object: mesh, body });
+		} else if (object.type === "Object3D") {
+			const actorType = object.userData["conduit_actor"] as string | undefined;
+			if (actorType && actorType in actors) {
+				actors[actorType as keyof typeof actors].push({ object });
 			}
 		}
 	});
-}
 
-const canvas = document.querySelector("#app")!;
+	{
+		const body = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
+		body.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+		world.addBody(body);
+	}
 
-let camera = new THREE.PerspectiveCamera();
-const scene = new THREE.Scene();
-scene.background = new THREE.Color("grey");
+	scene.add(level.scene);
 
-const world = new CANNON.World();
-world.gravity.set(0, -9.82, 0);
-world.broadphase = new CANNON.SAPBroadphase(world);
-world.defaultContactMaterial.friction = 0;
+	{
+		const mesh = cube.scene.children[0];
+		if (mesh instanceof THREE.Mesh) {
+			const shape = new CANNON.Box(
+				new CANNON.Vec3(...V3.toTuple(mesh.geometry.boundingBox.max)),
+			);
 
-const groundMaterial = new CANNON.Material("ground");
+			actors.cube.forEach(({ object }) => {
+				const body = new CANNON.Body({
+					mass: 1,
+					shape,
+					material: materials.ground,
+					position: V3.toCANNON(object.position),
+				});
+				world.addBody(body);
+				object.add(mesh.clone());
+				bodies.push({ object, body });
+			});
+		}
+	}
+
+	{
+		const instance: {
+			parent: THREE.Object3D;
+			collider: THREE.Mesh | undefined;
+		} = { parent: new THREE.Object3D(), collider: undefined };
+
+		car.scene.children.forEach((object) => {
+			if (object.userData["collider"] && object instanceof THREE.Mesh) {
+				instance.collider = object;
+			} else {
+				instance.parent.add(object.clone());
+			}
+		});
+
+		const mesh = instance.collider;
+		if (mesh) {
+			const shape = new CANNON.Box(
+				new CANNON.Vec3(...V3.toTuple(mesh.geometry.boundingBox!.max)),
+			);
+
+			actors.car.forEach(({ object }) => {
+				const body = new CANNON.Body({
+					mass: 1,
+					shape,
+					material: materials.ground,
+					position: V3.toCANNON(object.position),
+				});
+				world.addBody(body);
+				object.add(instance.parent);
+				bodies.push({ object, body });
+			});
+		}
+	}
+
+	const cannonDebugger = CannonDebugger(scene, world);
+
+	function animation(_dt: number) {
+		world.fixedStep();
+		cannonDebugger.update();
+
+		bodies.forEach(({ object, body }) => {
+			object.position.copy(body.position as unknown as THREE.Vector3);
+			object.quaternion.copy(body.quaternion as unknown as THREE.Quaternion);
+		});
+
+		renderer.render(scene, camera);
+	}
+})();
+
 // groundMaterial.friction = 0.25
 // groundMaterial.restitution = 0.25
 
-const getVec3Tuple = (
-	vec3: Record<"x" | "y" | "z", number>,
-): [x: number, y: number, z: number] => {
-	const { x, y, z } = vec3;
-	return [x, y, z];
-};
+// function addActor(actorType: string, object: THREE.Object3D): void {
+//   if (!(actorType in actors)) {
+//     console.warn(`unknown actor: ${actorType}`);
+//     return;
+//   }
 
-const physicsActors: {
-	mesh: THREE.Mesh;
-	body: CANNON.Body;
-}[] = [];
-
-type SceneID = keyof typeof scenes;
-type ActorType = "car" | "cube";
-
-const actors: Record<
-	ActorType,
-	{
-		add: (object: THREE.Object3D) => void;
-		remove: (object: THREE.Object3D) => void;
-		objects: THREE.Object3D[];
-	}
-> = {
-	cube: {
-		add: (object) => {
-			object.add(gltfs.cube.gltf.scene);
-		},
-		remove: (object) => {},
-		objects: [],
-	},
-	car: {
-		add: (object) => {},
-		remove: (object) => {},
-		objects: [],
-	},
-};
-
-function addActor(actorType: string, object: THREE.Object3D): void {
-	if (!(actorType in actors)) {
-		console.warn(`unknown actor: ${actorType}`);
-		return;
-	}
-
-	const actorRegistry = actors[actorType as ActorType];
-	actorRegistry.objects.push(object);
-	actorRegistry.add(object);
-}
-
-const loader = new GLTFLoader();
-loader.load(gltfLevel, (gltf) => {
-	console.log(gltfLevel, gltf);
-
-	console.log(physicsActors);
-
-	scene.add(gltf.scene);
-});
-
-loader.load(gltfCube, (gltf) => {
-	console.log(gltfCube, gltf);
-});
+//   const actorRegistry = actors[actorType as ActorType];
+//   actorRegistry.objects.push(object);
+//   actorRegistry.add(object);
+// }
 
 // const groundWheelContactMaterial = new CANNON.ContactMaterial(
 //   groundMaterial,
@@ -152,25 +203,6 @@ loader.load(gltfCube, (gltf) => {
 // const wheelMaterial = new CANNON.Material('wheelMaterial')
 // wheelMaterial.friction = 0.25
 // wheelMaterial.restitution = 0.25
-
-const renderer = new THREE.WebGLRenderer({ antialias: true, canvas });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setAnimationLoop(animation);
-
-// DEBUG ONLY
-const cannonDebugger = CannonDebugger(scene, world);
-
-function animation(_dt: number) {
-	world.fixedStep();
-	cannonDebugger.update();
-
-	physicsActors.forEach(({ mesh, body }) => {
-		mesh.position.copy(body.position as unknown as THREE.Vector3);
-		mesh.quaternion.copy(body.quaternion as unknown as THREE.Quaternion);
-	});
-
-	renderer.render(scene, camera);
-}
 
 // camera
 // {

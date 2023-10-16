@@ -1,9 +1,9 @@
 import { GLTF, GLTFLoader } from "three/addons/loaders/GLTFLoader";
 import { manager } from "./manager";
 
-import levelUrl from "./level.gltf?url";
-import cubeUrl from "./cube.gltf?url";
-import carUrl from "./car.gltf?url";
+import levelUrl from "./scenes/level.gltf?url";
+import cubeUrl from "./scenes/cube.gltf?url";
+import carUrl from "./scenes/car.gltf?url";
 
 const loader = new GLTFLoader(manager);
 
