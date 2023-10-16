@@ -21,8 +21,8 @@ def object_update_placeholder(self, ctx):
 	value = self.conduit_actor
 	collection = None
 
-	if ctx.scene.conduit_actors:
-		for actor in ctx.scene.conduit_actors:
+	if ctx.workspace.conduit_actors:
+		for actor in ctx.workspace.conduit_actors:
 			if (actor.name == value):
 				collection = actor.placeholder
 
@@ -45,8 +45,6 @@ class ExportOperator(bpy.types.Operator):
 			self.report({'WARNING'}, "Scene must be saved first.")
 			return {'CANCELLED'}
 
-		bpy.types.Object.conduit_hidden = bpy.props.BoolProperty()
-
 		# Clear all instance/instance_collection for export, then restore.
 		actors = []
 		for object in ctx.scene.objects:
@@ -63,7 +61,7 @@ class ExportOperator(bpy.types.Operator):
 		for object, actor_id, instance_collection in actors:
 			object.conduit_actor = actor_id
 
-		filedir = bpy.path.abspath(ctx.scene.conduit_export_path or "//")
+		filedir = bpy.path.abspath(ctx.workspace.conduit_export_path or "//")
 		filename = ctx.scene.name + ".gltf"
 		filepath = os.path.abspath(filedir + filename)
 
@@ -71,6 +69,8 @@ class ExportOperator(bpy.types.Operator):
 		bpy.ops.export_scene.gltf(
 			filepath=filepath,
 			check_existing=False,
+			# Only current scene.
+			use_active_scene=True,
 			# Unitless, works best for Three.
 			export_import_convert_lighting_mode="COMPAT",
 			# Single file.
@@ -97,7 +97,7 @@ class ExportOperator(bpy.types.Operator):
 		return {'FINISHED'}
 
 
-class ExportPanel(bpy.types.Panel):
+class WorkspacePanel(bpy.types.Panel):
 	bl_idname = "CONDUIT_PT_panel"
 	bl_label = "Conduit"
 	bl_space_type = "VIEW_3D"
@@ -111,18 +111,71 @@ class ExportPanel(bpy.types.Panel):
 			text="Export as " + filename,
 		)
 		self.layout.prop(
-			ctx.scene,
+			ctx.workspace,
 			"conduit_export_path",
 			text="Path",
 		)
 
+		row = self.layout.row()
 
-class ObjectPropertiesPanel(bpy.types.Panel):
+		template_list_options = {
+			"list_type": "CONDUIT_UL_SceneActorsList",
+			"list_id": "conduit_actors",
+			"data": (ctx.workspace, "conduit_actors"),
+			"data_active_index": (ctx.workspace, "conduit_actors_active_index"),
+		}
+
+		col = row.column()
+		col.template_list(
+			template_list_options["list_type"],
+			template_list_options["list_id"],
+			template_list_options["data"][0],
+			template_list_options["data"][1],
+			template_list_options["data_active_index"][0],
+			template_list_options["data_active_index"][1],
+			rows=4,
+		)
+
+		col = row.column(align=True)
+		col.operator(SceneActorAddOperator.bl_idname, icon='ADD', text="")
+		col.operator(SceneActorRemoveOperator.bl_idname, icon='REMOVE', text="")
+
+		#  if ctx.workspace.conduit_actors and ctx.workspace.conduit_actors_active_index >= 0:
+		#    item = ctx.workspace.conduit_actors[ctx.workspace.conduit_actors_active_index]
+		#    row = self.layout.row()
+		#    row.prop(item, "placeholder")
+
+
+class CONDUIT_UL_SceneActorsList(bpy.types.UIList):
+	def draw_item(self, ctx, layout, data, item, icon, active_data, active_property):
+		layout.prop(item, "name", text="", icon="EMPTY_AXIS")
+		layout.prop(item, "placeholder", text="", icon="META_CUBE")
+
+
+class SceneActorAddOperator(bpy.types.Operator):
+	bl_idname = "conduit.scene_actors_add"
+	bl_label = "Add a new actor type"
+
+	def execute(self, ctx):
+		ctx.workspace.conduit_actors.add()
+		return {'FINISHED'}
+
+
+class SceneActorRemoveOperator(bpy.types.Operator):
+	bl_idname = "conduit.scene_actors_remove"
+	bl_label = "Remove an existing actor type"
+
+	def execute(self, ctx):
+		ctx.workspace.conduit_actors.remove(ctx.workspace.conduit_actors_active_index)
+		return {'FINISHED'}
+
+
+class ObjectDataPropertiesPanel(bpy.types.Panel):
 	bl_idname = "CONDUIT_PT_object_panel"
 	bl_label = "Conduit"
 	bl_space_type = "PROPERTIES"
 	bl_region_type = "WINDOW"
-	bl_context = "object"
+	bl_context = "data"
 
 	@classmethod
 	def poll(cls, ctx):
@@ -147,75 +200,12 @@ class SceneActorProperty(bpy.types.PropertyGroup):
 		update=scene_actor_placeholder_update)
 
 
-class SceneActorAddOperator(bpy.types.Operator):
-	bl_idname = "conduit.scene_actors_add"
-	bl_label = "Add a new actor type"
-
-	def execute(self, ctx):
-		ctx.scene.conduit_actors.add()
-		return {'FINISHED'}
-
-
-class SceneActorRemoveOperator(bpy.types.Operator):
-	bl_idname = "conduit.scene_actors_remove"
-	bl_label = "Remove an existing actor type"
-
-	def execute(self, ctx):
-		ctx.scene.conduit_actors.remove(ctx.scene.conduit_actors_active_index)
-		return {'FINISHED'}
-
-
-class CONDUIT_UL_SceneActorsList(bpy.types.UIList):
-	def draw_item(self, ctx, layout, data, item, icon, active_data, active_property):
-		layout.prop(item, "name", text="", icon="EMPTY_AXIS")
-		if item.placeholder:
-			layout.label(text=item.placeholder.name, icon='META_CUBE')
-
-
-class ScenePropertiesPanel(bpy.types.Panel):
-	bl_idname = "CONDUIT_PT_scene_panel"
-	bl_label = "Conduit"
-	bl_space_type = "PROPERTIES"
-	bl_region_type = "WINDOW"
-	bl_context = "scene"
-
-	def draw(self, ctx):
-		row = self.layout.row()
-
-		template_list_options = {
-			"list_type": "CONDUIT_UL_SceneActorsList",
-			"list_id": "conduit_actors",
-			"data": (ctx.scene, "conduit_actors"),
-			"data_active_index": (ctx.scene, "conduit_actors_active_index"),
-		}
-
-		col = row.column()
-		col.template_list(
-			template_list_options["list_type"],
-			template_list_options["list_id"],
-			template_list_options["data"][0],
-			template_list_options["data"][1],
-			template_list_options["data_active_index"][0],
-			template_list_options["data_active_index"][1],
-			rows=4,
-		)
-
-		col = row.column(align=True)
-		col.operator(SceneActorAddOperator.bl_idname, icon='ADD', text="")
-		col.operator(SceneActorRemoveOperator.bl_idname, icon='REMOVE', text="")
-
-		if ctx.scene.conduit_actors and ctx.scene.conduit_actors_active_index >= 0:
-			item = ctx.scene.conduit_actors[ctx.scene.conduit_actors_active_index]
-			row = self.layout.row()
-			row.prop(item, "placeholder")
-
-
 def object_actor_items(self, ctx):
 	if not ctx:
 		return []
 
 	items = [(ACTOR_NONE, 'None', '')]
-	for actor in ctx.scene.conduit_actors:
+	for actor in ctx.workspace.conduit_actors:
 		name = actor.name
 		items.append((name, name, ''))
 	return items
@@ -230,11 +220,11 @@ def register():
 	bpy.utils.register_class(SceneActorProperty)
 
 	# props
-	bpy.types.Scene.conduit_export_path = \
+	bpy.types.WorkSpace.conduit_export_path = \
 		bpy.props.StringProperty(subtype='DIR_PATH', default="//")
-	bpy.types.Scene.conduit_actors = \
+	bpy.types.WorkSpace.conduit_actors = \
 		bpy.props.CollectionProperty(type=SceneActorProperty)
-	bpy.types.Scene.conduit_actors_active_index = \
+	bpy.types.WorkSpace.conduit_actors_active_index = \
 		bpy.props.IntProperty(default=0)
 	bpy.types.Object.conduit_actor = \
 		bpy.props.EnumProperty(items=object_actor_items, update=object_actor_update)
@@ -248,16 +238,14 @@ def register():
 	bpy.utils.register_class(CONDUIT_UL_SceneActorsList)
 
 	# panels
-	bpy.utils.register_class(ScenePropertiesPanel)
-	bpy.utils.register_class(ObjectPropertiesPanel)
-	bpy.utils.register_class(ExportPanel)
+	bpy.utils.register_class(ObjectDataPropertiesPanel)
+	bpy.utils.register_class(WorkspacePanel)
 
 
 def unregister():
 	# panels
-	bpy.utils.unregister_class(ScenePropertiesPanel)
-	bpy.utils.unregister_class(ObjectPropertiesPanel)
-	bpy.utils.unregister_class(ExportPanel)
+	bpy.utils.unregister_class(ObjectDataPropertiesPanel)
+	bpy.utils.unregister_class(WorkspacePanel)
 
 	# ui
 	bpy.utils.unregister_class(CONDUIT_UL_SceneActorsList)
@@ -268,9 +256,9 @@ def unregister():
 	bpy.utils.unregister_class(SceneActorRemoveOperator)
 
 	# props
-	del bpy.types.Scene.conduit_export_path
-	del bpy.types.Scene.conduit_actors
-	del bpy.types.Scene.conduit_actors_active_index
+	del bpy.types.WorkSpace.conduit_export_path
+	del bpy.types.WorkSpace.conduit_actors
+	del bpy.types.WorkSpace.conduit_actors_active_index
 	del bpy.types.Object.conduit_actor
 
 	# types
