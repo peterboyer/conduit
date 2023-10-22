@@ -37,7 +37,7 @@ def object_update_placeholder(self, ctx):
 
 class ExportOperator(bpy.types.Operator):
 	bl_idname = "conduit.export"
-	bl_label = "Export scene.gltf"
+	bl_label = "Export scene.glb"
 	bl_options = {'REGISTER'}
 
 	def execute(self, ctx):
@@ -62,7 +62,7 @@ class ExportOperator(bpy.types.Operator):
 			object.conduit_actor = actor_id
 
 		filedir = bpy.path.abspath(ctx.workspace.conduit_export_path or "//")
-		filename = ctx.scene.name + ".gltf"
+		filename = ctx.scene.name + ".glb"
 		filepath = os.path.abspath(filedir + filename)
 
 		# https://docs.blender.org/api/current/bpy.ops.export_scene.html
@@ -74,7 +74,7 @@ class ExportOperator(bpy.types.Operator):
 			# Unitless, works best for Three.
 			export_import_convert_lighting_mode="COMPAT",
 			# Single file.
-			export_format="GLTF_EMBEDDED",
+			export_format="GLB",
 			# Cameras.
 			export_cameras=True,
 			# Lights.
@@ -105,7 +105,7 @@ class WorkspacePanel(bpy.types.Panel):
 	bl_category = "Conduit"
 
 	def draw(self, ctx):
-		filename = ctx.scene.name + ".gltf"
+		filename = ctx.scene.name + ".glb"
 		self.layout.operator(
 			ExportOperator.bl_idname,
 			text="Export as " + filename,
