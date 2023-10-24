@@ -1,223 +1,201 @@
-import * as THREE from "three";
-import * as CANNON from "cannon-es";
-import { OrbitControls } from "three/addons/controls/OrbitControls";
-import CannonDebugger from "cannon-es-debugger";
+import HavokPhysics from "@babylonjs/havok";
+import {
+	Vector3,
+	Engine,
+	Scene,
+	SceneLoader,
+	HemisphericLight,
+	ArcRotateCamera,
+	Color3,
+	Color4,
+	AssetContainer,
+	InstantiatedEntries,
+	HavokPlugin,
+	Mesh,
+	PhysicsAggregate,
+	PhysicsShapeType,
+	HingeConstraint,
+} from "@babylonjs/core";
+import "@babylonjs/loaders/glTF";
 
-import * as scenes from "./scenes";
-
-const V3 = {
-	toTHREE: (vec: CANNON.Vec3) => vec as unknown as THREE.Vector3,
-	toCANNON: (vec: THREE.Vector3) => vec as unknown as CANNON.Vec3,
-	toTuple: (
-		vec: Record<"x" | "y" | "z", number>,
-	): [x: number, y: number, z: number] => {
-		const { x, y, z } = vec;
-		return [x, y, z];
-	},
-};
+import levelUrl from "./scenes/level.glb?url";
+import cubeUrl from "./scenes/cube.glb?url";
+import carUrl from "./scenes/car.glb?url";
+import { Inspector } from "@babylonjs/inspector";
 
 (async () => {
-	const [level, cube, car] = await Promise.all([
-		scenes.level.gltf,
-		scenes.cube.gltf,
-		scenes.car.gltf,
-	]);
+	const canvas = document.getElementById("app") as HTMLCanvasElement;
 
+	const antialias = true;
+	const engine = new Engine(canvas, antialias);
+
+	const scene = new Scene(engine);
+	scene.clearColor = Color4.FromColor3(Color3.Gray());
+
+	{
+		const havok = await HavokPhysics();
+		const gravity = new Vector3(0, -9.81, 0);
+		const plugin = new HavokPlugin(true, havok);
+		scene.enablePhysics(gravity, plugin);
+	}
+
+	const physicsHelper = false;
+
+	Inspector.Show(scene, {});
+	if (physicsHelper) {
+		// @workaround
+		// Turn on Physics Helper
+		// @ts-ignore
+		document.querySelector('.label[title="Debug"]')!.click();
+		setTimeout(() => {
+			// @ts-ignore
+			document.querySelectorAll(".container.lbl")[1]!.click();
+		}, 200);
+	}
+
+	function load(url: string) {
+		return new Promise<AssetContainer>((resolve) => {
+			const rootUrl = url;
+			const sceneFilename = undefined;
+			SceneLoader.LoadAssetContainer(rootUrl, sceneFilename, scene, resolve);
+		});
+	}
+
+	const level = await load(levelUrl);
+	const cube = await load(cubeUrl);
+	const car = await load(carUrl);
+
+	console.log(scene);
 	console.log({ level, cube, car });
 
-	const canvas = document.querySelector("#app")!;
+	level.addToScene();
+	const aggregates: PhysicsAggregate[] = [];
 
-	const camera = (() => {
-		const camera = level.cameras[0];
-		if (camera instanceof THREE.PerspectiveCamera) {
-			return camera;
-		}
-		return new THREE.PerspectiveCamera();
-	})();
-
-	camera.aspect = document.body.clientWidth / document.body.clientHeight;
-	camera.updateProjectionMatrix();
-	const controls = new OrbitControls(camera, canvas);
-	controls.update();
-
-	const renderer = new THREE.WebGLRenderer({
-		antialias: true,
-		canvas: canvas,
-	});
-	renderer.setSize(window.innerWidth, window.innerHeight);
-	renderer.setAnimationLoop(animation);
-
-	const scene = new THREE.Scene();
-	scene.background = new THREE.Color("grey");
-
-	const world = new CANNON.World();
-	world.gravity.set(0, -9.82, 0);
-	world.broadphase = new CANNON.SAPBroadphase(world);
-	world.defaultContactMaterial.friction = 0;
-
-	type Actor = { object: THREE.Object3D };
-	const actors = {
-		cube: [] as Actor[],
-		car: [] as Actor[],
+	const actors: Record<
+		"cube" | "car",
+		{ entries: InstantiatedEntries; aggregates: PhysicsAggregate[] }[]
+	> = {
+		cube: [],
+		car: [],
 	};
+	const nodes = scene.getNodes();
+	nodes.forEach((node) => {
+		const actorTypeUnsafe = node.metadata?.gltf?.extras?.conduit_actor as
+			| string
+			| undefined;
 
-	const bodies: { object: THREE.Object3D; body: CANNON.Body }[] = [];
-
-	const materials = {
-		ground: new CANNON.Material("ground"),
-	};
-
-	level.scene.children.forEach((object) => {
-		if (object instanceof THREE.Mesh) {
-			const mesh = object;
-			mesh.receiveShadow = true;
-
-			type Geometry = THREE.BufferGeometry<{ position: THREE.BufferAttribute }>;
-			const indices = (mesh.geometry as Geometry).index!
-				.array as unknown as number[];
-			const vertices = (mesh.geometry as Geometry).attributes.position
-				.array as unknown as number[];
-			const shape = new CANNON.Trimesh(vertices, indices);
-
-			const body = new CANNON.Body({
-				mass: 0,
-				shape,
-				material: materials.ground,
-				position: V3.toCANNON(mesh.position),
-			});
-
-			world.addBody(body);
-			bodies.push({ object: mesh, body });
-		} else if (object.type === "Object3D") {
-			const actorType = object.userData["conduit_actor"] as string | undefined;
-			if (actorType && actorType in actors) {
-				actors[actorType as keyof typeof actors].push({ object });
+		if (!actorTypeUnsafe) {
+			if (node instanceof Mesh && node.geometry) {
+				const mesh = node;
+				const aggregate = new PhysicsAggregate(
+					mesh,
+					PhysicsShapeType.MESH,
+					{ mass: 0 },
+					scene,
+				);
+				aggregates.push(aggregate);
 			}
+
+			return;
+		}
+
+		if (actorTypeUnsafe === "cube") {
+			const entries = cube.instantiateModelsToScene();
+			const aggregates: PhysicsAggregate[] = [];
+			entries.rootNodes.forEach((rootNode) => {
+				rootNode.parent = node;
+				rootNode.getChildMeshes().forEach((mesh) => {
+					const aggregate = new PhysicsAggregate(
+						mesh,
+						PhysicsShapeType.MESH,
+						{ mass: 10 },
+						scene,
+					);
+					aggregates.push(aggregate);
+				});
+			});
+			actors.cube.push({ entries, aggregates });
+		} else if (actorTypeUnsafe === "car") {
+			const entries = car.instantiateModelsToScene(
+				(name) => `car[${actors.car.length}].${name}`,
+			);
+			const aggregates: PhysicsAggregate[] = [];
+			entries.rootNodes.forEach((rootNode) => {
+				const _car: Partial<Record<string, PhysicsAggregate>> = {};
+				rootNode.parent = node;
+				rootNode.getChildren().forEach((node) => {
+					if (!(node instanceof Mesh)) {
+						return;
+					}
+					const mesh = node;
+					mesh.visibility = 0;
+					const aggregate = new PhysicsAggregate(
+						mesh,
+						PhysicsShapeType.MESH,
+						{ mass: 10 },
+						scene,
+					);
+					_car["body"] = aggregate;
+					aggregates.push(aggregate);
+				});
+				rootNode.getChildMeshes().forEach((mesh) => {
+					console.log({ mesh }, mesh.name);
+					const id = mesh.name.split(".")[1];
+					if (!id?.startsWith("w_")) {
+						return;
+					}
+
+					const aggregate = new PhysicsAggregate(
+						mesh,
+						PhysicsShapeType.MESH,
+						{ mass: 10 },
+						scene,
+					);
+					_car[id] = aggregate;
+					aggregates.push(aggregate);
+				});
+
+				const car_body = _car["body"];
+				const car_w_fl = _car["w_fl"];
+				const car_w_fr = _car["w_fr"];
+				const car_w_rl = _car["w_rl"];
+				const car_w_rr = _car["w_rr"];
+
+				if (!(car_body && car_w_fl && car_w_fr && car_w_rl && car_w_rr)) {
+					throw new Error("bad car asset, missing body and/or wheels (w_*)");
+				}
+
+				// https://dzone.com/articles/webgl-physics-based-car-using-babylonjs-and-oimojs
+				const constraint = new HingeConstraint(
+					new Vector3(),
+					new Vector3(),
+					new Vector3(),
+					new Vector3(),
+					scene,
+				);
+				car_body.body.addConstraint(car_w_fl.body, constraint);
+				car_body.body.addConstraint(car_w_fr.body, constraint);
+				car_body.body.addConstraint(car_w_rl.body, constraint);
+				car_body.body.addConstraint(car_w_rr.body, constraint);
+			});
+			actors.car.push({ entries, aggregates });
 		}
 	});
 
-	{
-		const body = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
-		body.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-		world.addBody(body);
-	}
+	const camera = new ArcRotateCamera(
+		"camera",
+		-Math.PI / 2,
+		Math.PI / 2.5,
+		40,
+		new Vector3(0, 0, 0),
+		scene,
+	);
+	camera.attachControl(canvas, true);
 
-	scene.add(level.scene);
+	const light = new HemisphericLight("light1", new Vector3(0, 1, 0), scene);
+	light.intensity = 0.7;
 
-	{
-		const mesh = cube.scene.children[0];
-		if (mesh instanceof THREE.Mesh) {
-			const shape = new CANNON.Box(
-				new CANNON.Vec3(...V3.toTuple(mesh.geometry.boundingBox.max)),
-			);
-
-			actors.cube.forEach(({ object }) => {
-				const body = new CANNON.Body({
-					mass: 1,
-					shape,
-					material: materials.ground,
-					position: V3.toCANNON(object.position),
-				});
-				world.addBody(body);
-				object.add(mesh.clone());
-				bodies.push({ object, body });
-			});
-		}
-	}
-
-	{
-		const instance: {
-			parent: THREE.Object3D;
-			collider: THREE.Mesh | undefined;
-		} = { parent: new THREE.Object3D(), collider: undefined };
-
-		car.scene.children.forEach((object) => {
-			if (object.userData["collider"] && object instanceof THREE.Mesh) {
-				instance.collider = object;
-			} else {
-				instance.parent.add(object.clone());
-			}
-		});
-
-		const mesh = instance.collider;
-		if (mesh) {
-			const shape = new CANNON.Box(
-				new CANNON.Vec3(...V3.toTuple(mesh.geometry.boundingBox!.max)),
-			);
-
-			actors.car.forEach(({ object }) => {
-				const body = new CANNON.Body({
-					mass: 1,
-					shape,
-					material: materials.ground,
-					position: V3.toCANNON(object.position),
-				});
-				world.addBody(body);
-				object.add(instance.parent);
-				bodies.push({ object, body });
-			});
-		}
-	}
-
-	const cannonDebugger = CannonDebugger(scene, world);
-
-	function animation(_dt: number) {
-		world.fixedStep();
-		cannonDebugger.update();
-
-		bodies.forEach(({ object, body }) => {
-			object.position.copy(body.position as unknown as THREE.Vector3);
-			object.quaternion.copy(body.quaternion as unknown as THREE.Quaternion);
-		});
-
-		renderer.render(scene, camera);
-	}
+	engine.runRenderLoop(() => {
+		scene.render();
+	});
 })();
-
-// groundMaterial.friction = 0.25
-// groundMaterial.restitution = 0.25
-
-// function addActor(actorType: string, object: THREE.Object3D): void {
-//   if (!(actorType in actors)) {
-//     console.warn(`unknown actor: ${actorType}`);
-//     return;
-//   }
-
-//   const actorRegistry = actors[actorType as ActorType];
-//   actorRegistry.objects.push(object);
-//   actorRegistry.add(object);
-// }
-
-// const groundWheelContactMaterial = new CANNON.ContactMaterial(
-//   groundMaterial,
-//   wheelMaterial,
-//   {
-//     friction: 0.3,
-//     restitution: 0,
-//     contactEquationStiffness: 1000,
-//   },
-// );
-
-// world.addContactMaterial(groundWheelContactMaterial);
-
-// const wheelMaterial = new CANNON.Material('wheelMaterial')
-// wheelMaterial.friction = 0.25
-// wheelMaterial.restitution = 0.25
-
-// camera
-// {
-//   const fov = 45;
-//   const aspect = window.innerWidth / window.innerHeight;
-//   const near = 0.01;
-//   const far = 10;
-//   const camera = new THREE.PerspectiveCamera(fov, aspect, near, far);
-// }
-
-// skylight
-// {
-//   const skyColor = 0xb1e1ff; // light blue
-//   const groundColor = 0xb97a20; // brownish orange
-//   const intensity = 2;
-//   const light = new THREE.HemisphereLight(skyColor, groundColor, intensity);
-//   scene.add(light);
-// }
